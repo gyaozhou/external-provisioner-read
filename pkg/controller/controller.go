@@ -128,6 +128,8 @@ const (
 	tokenPVCNameKey      = "pvc.name"
 	tokenPVCNameSpaceKey = "pvc.namespace"
 
+	// zhou: set rsync period to 1 hours.
+
 	ResyncPeriodOfCsiNodeInformer        = 1 * time.Hour
 	ResyncPeriodOfReferenceGrantInformer = 1 * time.Hour
 
@@ -222,6 +224,8 @@ type requiredCapabilities struct {
 	modifyVolume bool
 }
 
+// zhou: README,
+
 // NodeDeployment contains additional parameters for running external-provisioner alongside a
 // CSI driver on one or more nodes in the cluster.
 type NodeDeployment struct {
@@ -248,15 +252,18 @@ type internalNodeDeployment struct {
 	rateLimiter workqueue.RateLimiter
 }
 
+// zhou: core object who implements interfaces "Provisioner", "BlockProvisioner", "Qualifier",
+//
+//	which defined in lib-external-provisioner.
 type csiProvisioner struct {
 	client                                kubernetes.Interface
-	csiClient                             csi.ControllerClient
-	grpcClient                            *grpc.ClientConn
+	csiClient                             csi.ControllerClient // zhou: long time client to csi driver.
+	grpcClient                            *grpc.ClientConn     // zhou: grpc connection
 	snapshotClient                        snapclientset.Interface
 	timeout                               time.Duration
 	identity                              string
-	volumeNamePrefix                      string
-	defaultFSType                         string
+	volumeNamePrefix                      string // zhou: default is "pvc"
+	defaultFSType                         string // zhou: default is ""
 	volumeNameUUIDLength                  int
 	driverName                            string
 	pluginCapabilities                    rpc.PluginCapabilitySet
@@ -279,6 +286,7 @@ type csiProvisioner struct {
 }
 
 var (
+	// zhou: used for complier checking, "csiProvisioner struct" implements these interface.
 	_ controller.Provisioner      = &csiProvisioner{}
 	_ controller.BlockProvisioner = &csiProvisioner{}
 	_ controller.Qualifier        = &csiProvisioner{}
@@ -288,20 +296,24 @@ var (
 // identify string will be added in PV annotations under this key.
 var provisionerIDKey = "storage.kubernetes.io/csiProvisionerIdentity"
 
+// zhou: connect to CSI driver
 func Connect(address string, metricsManager metrics.CSIMetricsManager) (*grpc.ClientConn, error) {
 	return connection.Connect(address, metricsManager, connection.OnConnectionLoss(connection.ExitOnConnectionLoss()))
 }
 
+// zhou: rpc identify server's Probe().
 func Probe(conn *grpc.ClientConn, singleCallTimeout time.Duration) error {
 	return rpc.ProbeForever(conn, singleCallTimeout)
 }
 
+// zhou: rpc identify server's GetPluginInfo().
 func GetDriverName(conn *grpc.ClientConn, timeout time.Duration) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return rpc.GetDriverName(ctx, conn)
 }
 
+// zhou: rpc identity server's GetPluginCapabilities() and controller server's GetControllerCapabilities
 func GetDriverCapabilities(conn *grpc.ClientConn, timeout time.Duration) (rpc.PluginCapabilitySet, rpc.ControllerCapabilitySet, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -327,6 +339,8 @@ func GetNodeInfo(conn *grpc.ClientConn, timeout time.Duration) (*csi.NodeGetInfo
 	client := csi.NewNodeClient(conn)
 	return client.NodeGetInfo(ctx, &csi.NodeGetInfoRequest{})
 }
+
+// zhou: README,
 
 // NewCSIProvisioner creates new CSI provisioner.
 //
@@ -358,6 +372,7 @@ func NewCSIProvisioner(client kubernetes.Interface,
 	controllerPublishReadOnly bool,
 	preventVolumeModeConversion bool,
 ) controller.Provisioner {
+
 	broadcaster := record.NewBroadcaster()
 	broadcaster.StartLogging(klog.Infof)
 	broadcaster.StartRecordingToSink(&corev1.EventSinkImpl{Interface: client.CoreV1().Events(v1.NamespaceAll)})
@@ -415,6 +430,8 @@ func NewCSIProvisioner(client kubernetes.Interface,
 	return provisioner
 }
 
+// zhou: check csi driver's cappability before create/delete/clone/snapshot volume
+
 // This function get called before any attempt to communicate with the driver.
 // Before initiating Create/Delete API calls provisioner checks if Capabilities:
 // PluginControllerService,  ControllerCreateVolume sre supported and gets the  driver name.
@@ -452,6 +469,8 @@ func (p *csiProvisioner) checkDriverCapabilities(rc *requiredCapabilities) error
 	return nil
 }
 
+// zhou: generate PV name, default is pvc-[pvc uid]
+
 func makeVolumeName(prefix, pvcUID string, volumeNameUUIDLength int) (string, error) {
 	// create persistent name based on a volumeNamePrefix and volumeNameUUIDLength
 	// of PVC's UID
@@ -484,6 +503,8 @@ func getAccessTypeMount(fsType string, mountFlags []string) *csi.VolumeCapabilit
 	}
 }
 
+// zhou: verify access mode
+
 func getVolumeCapability(
 	claim *v1.PersistentVolumeClaim,
 	sc *storagev1.StorageClass,
@@ -511,6 +532,8 @@ func getVolumeCapability(
 		},
 	}, nil
 }
+
+// zhou: get volume capability
 
 func (p *csiProvisioner) getVolumeCapabilities(
 	claim *v1.PersistentVolumeClaim,
@@ -546,6 +569,8 @@ type prepareProvisionResult struct {
 	provDeletionSecrets *deletionSecretParams
 }
 
+// zhou: create csi rpc request
+
 // prepareProvision does non-destructive parameter checking and preparations for provisioning a volume.
 func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.PersistentVolumeClaim, sc *storagev1.StorageClass, selectedNode *v1.Node) (*prepareProvisionResult, controller.ProvisioningState, error) {
 	if sc == nil {
@@ -577,6 +602,8 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 		}
 	}
 
+	// zhou: verify PVC data source.
+
 	// Make sure the plugin is capable of fulfilling the requested options
 	rc := &requiredCapabilities{}
 	if dataSource != nil {
@@ -592,6 +619,7 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 			}
 			rc.snapshot = true
 		case pvcKind:
+			// zhou: fill PVC from another PVC, call "clone"
 			rc.clone = true
 		default:
 			// DataSource is not VolumeSnapshot and PVC
@@ -615,19 +643,25 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 		rc.modifyVolume = true
 	}
 
+	// zhou: check csi driver's capability
+
 	if err := p.checkDriverCapabilities(rc); err != nil {
 		return nil, controller.ProvisioningFinished, err
 	}
 
+	// zhou: doesn't not support selector.
 	if claim.Spec.Selector != nil {
 		return nil, controller.ProvisioningFinished, fmt.Errorf("claim Selector is not supported")
 	}
+
+	// zhou: generate PV name, why not using the PV name generated in lib-external-provisioner
 
 	pvName, err := makeVolumeName(p.volumeNamePrefix, string(claim.ObjectMeta.UID), p.volumeNameUUIDLength)
 	if err != nil {
 		return nil, controller.ProvisioningFinished, err
 	}
 
+	// zhou: handle "fstype", the only one StorageClass.parameter used by external-provisioner.
 	fsTypesFound := 0
 	fsType := ""
 	for k, v := range sc.Parameters {
@@ -642,13 +676,16 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 	if fsTypesFound > 1 {
 		return nil, controller.ProvisioningFinished, fmt.Errorf("fstype specified in parameters with both \"fstype\" and \"%s\" keys", prefixedFsTypeKey)
 	}
+	// zhou: if default fstype is set
 	if fsType == "" && p.defaultFSType != "" {
 		fsType = p.defaultFSType
 	}
 
+	// zhou: get request PVC capacity
 	capacity := claim.Spec.Resources.Requests[v1.ResourceName(v1.ResourceStorage)]
 	volSizeBytes := capacity.Value()
 
+	// zhou: get volume capability, e.g. access mode, block, mount ?
 	volumeCaps, err := p.getVolumeCapabilities(claim, sc, fsType)
 	if err != nil {
 		return nil, controller.ProvisioningFinished, err
@@ -656,8 +693,8 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 
 	// Create a CSI CreateVolumeRequest and Response
 	req := csi.CreateVolumeRequest{
-		Name:               pvName,
-		Parameters:         sc.Parameters,
+		Name:               pvName,        // zhou:
+		Parameters:         sc.Parameters, // zhou: just copy parmameters from StorageClass
 		VolumeCapabilities: volumeCaps,
 		CapacityRange: &csi.CapacityRange{
 			RequiredBytes: int64(volSizeBytes),
@@ -665,6 +702,7 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 	}
 
 	if dataSource != nil && (rc.clone || rc.snapshot) {
+		// zhou: convert data source to csi rpc request
 		volumeContentSource, err := p.getVolumeContentSource(ctx, claim, sc, dataSource)
 		if err != nil {
 			return nil, controller.ProvisioningNoChange, fmt.Errorf("error getting handle for DataSource Type %s by Name %s: %v", dataSource.Kind, dataSource.Name, err)
@@ -672,12 +710,15 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 		req.VolumeContentSource = volumeContentSource
 	}
 
+	// zhou: set finalizer on source PVC to prevent it from accidently deleted.
 	if dataSource != nil && rc.clone {
 		err = p.setCloneFinalizer(ctx, claim, dataSource)
 		if err != nil {
 			return nil, controller.ProvisioningNoChange, err
 		}
 	}
+
+	// zhou: README,
 
 	if p.supportsTopology() {
 		requirements, err := GenerateAccessibilityRequirements(
@@ -695,6 +736,8 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 		}
 		req.AccessibilityRequirements = requirements
 	}
+
+	// zhou: README, convert credential to csi rpc request
 
 	// Resolve provision secret credentials.
 	provisionerSecretRef, err := getSecretReference(provisionerSecretParams, sc.Parameters, pvName, &v1.PersistentVolumeClaim{
@@ -743,11 +786,13 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 		NodeExpandSecretRef:        nodeExpandSecretRef,
 	}
 
+	// zhou: remove prefix of keys
 	req.Parameters, err = removePrefixedParameters(sc.Parameters)
 	if err != nil {
 		return nil, controller.ProvisioningFinished, fmt.Errorf("failed to strip CSI Parameters of prefixed keys: %v", err)
 	}
 
+	// zhou: by this way, PVC namespace could be filled into parameters !!!
 	if p.extraCreateMetadata {
 		// add pvc and pv metadata to request for use by the plugin
 		req.Parameters[pvcNameKey] = claim.GetName()
@@ -784,8 +829,13 @@ func (p *csiProvisioner) prepareProvision(ctx context.Context, claim *v1.Persist
 
 }
 
+// zhou: invoked by lib-external-provisioner/controller.go, "provisionClaimOperation()"
+//       Create volume via csi driver, and return pv object to be created.
+
 func (p *csiProvisioner) Provision(ctx context.Context, options controller.ProvisionOptions) (*v1.PersistentVolume, controller.ProvisioningState, error) {
 	claim := options.PVC
+
+	// zhou: verify again and again.
 	provisioner, ok := claim.Annotations[annStorageProvisioner]
 	if !ok {
 		provisioner = claim.Annotations[annBetaStorageProvisioner]
@@ -814,6 +864,8 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 		}
 	}
 
+	// zhou: prepare csi rpc request
+
 	result, state, err := p.prepareProvision(ctx, claim, options.StorageClass, options.SelectedNode)
 	if result == nil {
 		return nil, state, err
@@ -826,8 +878,13 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 	createCtx := markAsMigrated(ctx, result.migratedVolume)
 	createCtx, cancel := context.WithTimeout(createCtx, p.timeout)
 	defer cancel()
+
+	// zhou: rpc invoke csi driver to create volume
+
 	rep, err := p.csiClient.CreateVolume(createCtx, req)
 	if err != nil {
+		// zhou: README,
+
 		// Giving up after an error and telling the pod scheduler to retry with a different node
 		// only makes sense if:
 		// - The CSI driver supports topology: without that, the next CreateVolume call after
@@ -854,9 +911,13 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 		return nil, state, err
 	}
 
+	// zhou: create volume success
+
 	if rep.Volume != nil {
 		klog.V(3).Infof("create volume rep: %+v", *rep.Volume)
 	}
+	// zhou: set it to pv.spec.csi.volumeattributes
+	//       "storage.kubernetes.io/csiProvisionerIdentity" = provisioner id
 	volumeAttributes := map[string]string{provisionerIDKey: p.identity}
 	for k, v := range rep.Volume.VolumeContext {
 		volumeAttributes[k] = v
@@ -880,6 +941,8 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 		return nil, controller.ProvisioningInBackground, capErr
 	}
 
+	// zhou: verify data source in csi rpc response
+
 	if options.PVC.Spec.DataSource != nil ||
 		(utilfeature.DefaultFeatureGate.Enabled(features.CrossNamespaceVolumeDataSource) &&
 			options.PVC.Spec.DataSourceRef != nil && options.PVC.Spec.DataSourceRef.Namespace != nil &&
@@ -897,6 +960,7 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 			return nil, controller.ProvisioningInBackground, sourceErr
 		}
 	}
+
 	pvReadOnly := false
 	volCaps := req.GetVolumeCapabilities()
 	// if the request only has one accessmode and if its ROX, set readonly to true
@@ -905,9 +969,14 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 		pvReadOnly = true
 	}
 
+	// zhou: set CSIPersistentVolumeSource, used in pv.spec.PersistentVolumeSource
+
 	result.csiPVSource.VolumeHandle = p.volumeIdToHandle(rep.Volume.VolumeId)
 	result.csiPVSource.VolumeAttributes = volumeAttributes
 	result.csiPVSource.ReadOnly = pvReadOnly
+
+	// zhou: init PV object
+
 	pv := &v1.PersistentVolume{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: pvName,
@@ -977,6 +1046,8 @@ func (p *csiProvisioner) Provision(ctx context.Context, options controller.Provi
 	return pv, controller.ProvisioningFinished, nil
 }
 
+// zhou: set finalizer on source PVC.
+
 func (p *csiProvisioner) setCloneFinalizer(ctx context.Context, pvc *v1.PersistentVolumeClaim, dataSource *v1.ObjectReference) error {
 	claim, err := p.claimLister.PersistentVolumeClaims(dataSource.Namespace).Get(dataSource.Name)
 	if err != nil {
@@ -992,10 +1063,13 @@ func (p *csiProvisioner) setCloneFinalizer(ctx context.Context, pvc *v1.Persiste
 	return nil
 }
 
+// zhou: README,
+
 func (p *csiProvisioner) supportsTopology() bool {
 	return SupportsTopology(p.pluginCapabilities)
 }
 
+// zhou: remove url prefix
 func removePrefixedParameters(param map[string]string) (map[string]string, error) {
 	newParam := map[string]string{}
 	for k, v := range param {
@@ -1029,6 +1103,8 @@ func removePrefixedParameters(param map[string]string) (map[string]string, error
 	return newParam, nil
 }
 
+// zhou: convert PVC data source to csi rpc.
+
 // getVolumeContentSource is a helper function to process provisioning requests that include a DataSource
 // currently we provide Snapshot and PVC, the default case allows the provisioner to still create a volume
 // so that an external controller can act upon it.   Additional DataSource types can be added here with
@@ -1044,6 +1120,8 @@ func (p *csiProvisioner) getVolumeContentSource(ctx context.Context, claim *v1.P
 		return nil, nil
 	}
 }
+
+// zhou: README, verify create PVC from another PVC, which means clone.
 
 // getPVCSource verifies DataSource.Kind of type PersistentVolumeClaim, making sure that the requested PVC is available/ready
 // returns the VolumeContentSource for the requested PVC
@@ -1135,6 +1213,8 @@ func (p *csiProvisioner) getPVCSource(ctx context.Context, claim *v1.PersistentV
 	}
 	return volumeContentSource, nil
 }
+
+// zhou: README, verify create PVC from snapshot
 
 // getSnapshotSource verifies DataSource.Kind of type VolumeSnapshot, making sure that the requested Snapshot is available/ready
 // returns the VolumeContentSource for the requested snapshot
@@ -1386,6 +1466,8 @@ func (p *csiProvisioner) canDeleteVolume(volume *v1.PersistentVolume) error {
 	return nil
 }
 
+// zhou: pretent to support block volume when creating volume, and return error if doesn't.
+
 func (p *csiProvisioner) SupportsBlock(ctx context.Context) bool {
 	// SupportsBlock always return true, because current CSI spec doesn't allow checking
 	// drivers' capability of block volume before creating volume.
@@ -1393,6 +1475,8 @@ func (p *csiProvisioner) SupportsBlock(ctx context.Context) bool {
 	// by Provision if block AccessType is specified.
 	return true
 }
+
+// zhou: the driver name matched, and PVC owns the annotation required provision.
 
 func (p *csiProvisioner) ShouldProvision(ctx context.Context, claim *v1.PersistentVolumeClaim) bool {
 	provisioner, ok := claim.Annotations[annStorageProvisioner]
@@ -1580,6 +1664,8 @@ func (p *csiProvisioner) checkCapacity(ctx context.Context, claim *v1.Persistent
 	// Currently not enough capacity anywhere.
 	return false, nil
 }
+
+// zhou: README,
 
 // becomeOwner updates the PVC with the current node as selected node.
 // Returns an error if something unexpectedly failed, otherwise an updated PVC with

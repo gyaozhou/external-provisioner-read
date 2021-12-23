@@ -35,6 +35,8 @@ const (
 	probeInterval = 1 * time.Second
 )
 
+// zhou: rpc identify server's GetPluginInfo().
+
 // GetDriverName returns name of CSI driver.
 func GetDriverName(ctx context.Context, conn *grpc.ClientConn) (string, error) {
 	client := csi.NewIdentityClient(conn)
@@ -79,6 +81,8 @@ func GetPluginCapabilities(ctx context.Context, conn *grpc.ClientConn) (PluginCa
 
 // ControllerCapabilitySet is set of CSI controller capabilities. Only supported capabilities are in the map.
 type ControllerCapabilitySet map[csi.ControllerServiceCapability_RPC_Type]bool
+
+// zhou: rpc identify server's GetPluginCapabilities().
 
 // GetControllerCapabilities returns set of supported controller capabilities of CSI driver.
 func GetControllerCapabilities(ctx context.Context, conn *grpc.ClientConn) (ControllerCapabilitySet, error) {
@@ -166,6 +170,8 @@ func probeOnce(conn *grpc.ClientConn, timeout time.Duration) (bool, error) {
 	defer cancel()
 	return Probe(ctx, conn)
 }
+
+// zhou: rpc identify server's Probe().
 
 // Probe calls driver Probe() just once and returns its result without any processing.
 func Probe(ctx context.Context, conn *grpc.ClientConn) (ready bool, err error) {

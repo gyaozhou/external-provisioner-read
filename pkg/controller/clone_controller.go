@@ -21,6 +21,10 @@ import (
 	"sigs.k8s.io/sig-storage-lib-external-provisioner/v9/controller"
 )
 
+// zhou: checking any other PVC is cloning this PVC.
+//       If completed, remove finalizer "provisioner.storage.kubernetes.io/cloning-protection".
+//       If ongoing, requeue it.
+
 //
 // This package introduces a way to handle finalizers, related to in-progress PVC cloning. This is a two-step approach:
 //
@@ -35,11 +39,13 @@ import (
 // CloningProtectionController is storing all related interfaces
 // to handle cloning protection finalizer removal after CSI cloning is finished
 type CloningProtectionController struct {
-	client        kubernetes.Interface
-	claimLister   corelisters.PersistentVolumeClaimLister
-	claimInformer cache.SharedInformer
-	claimQueue    workqueue.RateLimitingInterface
+	client        kubernetes.Interface                    // zhou: clientset for k8s native resource
+	claimLister   corelisters.PersistentVolumeClaimLister // zhou: lister to get via cache.
+	claimInformer cache.SharedInformer                    // zhou: informer for register callback
+	claimQueue    workqueue.RateLimitingInterface         // zhou: workqueue for controller to consume
 }
+
+// zhou:
 
 // NewCloningProtectionController creates new controller for additional CSI claim protection capabilities
 func NewCloningProtectionController(
@@ -60,6 +66,8 @@ func NewCloningProtectionController(
 	}
 	return controller
 }
+
+// zhou: README,
 
 // Run is a main CloningProtectionController handler
 func (p *CloningProtectionController) Run(ctx context.Context, threadiness int) {
@@ -123,6 +131,8 @@ func (p *CloningProtectionController) processNextClaimWorkItem(ctx context.Conte
 	return true
 }
 
+// zhou: README,
+
 // enqueueClaimUpdate takes a PVC obj and stores it into the claim work queue.
 func (p *CloningProtectionController) enqueueClaimUpdate(ctx context.Context, obj interface{}) {
 	new, ok := obj.(*v1.PersistentVolumeClaim)
@@ -145,6 +155,8 @@ func (p *CloningProtectionController) enqueueClaimUpdate(ctx context.Context, ob
 	p.claimQueue.Add(key)
 }
 
+// zhou: pop event from queue
+
 // syncClaimHandler gets the claim from informer's cache then calls syncClaim
 func (p *CloningProtectionController) syncClaimHandler(ctx context.Context, key string) error {
 	namespace, name, err := cache.SplitMetaNamespaceKey(key)
@@ -166,6 +178,8 @@ func (p *CloningProtectionController) syncClaimHandler(ctx context.Context, key 
 	return p.syncClaim(ctx, claim)
 }
 
+// zhou: Reconcile(),
+
 // syncClaim removes finalizers from a PVC, when cloning is finished
 func (p *CloningProtectionController) syncClaim(ctx context.Context, claim *v1.PersistentVolumeClaim) error {
 	if !checkFinalizer(claim, pvcCloneFinalizer) {
@@ -178,11 +192,15 @@ func (p *CloningProtectionController) syncClaim(ctx context.Context, claim *v1.P
 		return err
 	}
 
+	// zhou: check other PVC
+
 	// Check for pvc state with DataSource pointing to claim
 	for _, pvc := range pvcList {
 		if pvc.Spec.DataSource == nil {
 			continue
 		}
+
+		// zhou: some other PVC is cloning this PVC, don't touch this PVC right now.
 
 		// Requeue when at least one PVC is still works on cloning
 		if pvc.Spec.DataSource.Kind == pvcKind &&

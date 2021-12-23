@@ -70,8 +70,10 @@ import (
 )
 
 var (
-	master               = flag.String("master", "", "Master URL to build a client config from. Either this or kubeconfig needs to be set if the provisioner is being run out of cluster.")
-	kubeconfig           = flag.String("kubeconfig", "", "Absolute path to the kubeconfig file. Either this or master needs to be set if the provisioner is being run out of cluster.")
+	master     = flag.String("master", "", "Master URL to build a client config from. Either this or kubeconfig needs to be set if the provisioner is being run out of cluster.")
+	kubeconfig = flag.String("kubeconfig", "", "Absolute path to the kubeconfig file. Either this or master needs to be set if the provisioner is being run out of cluster.")
+
+	// zhou: target CSI driver
 	csiEndpoint          = flag.String("csi-address", "/run/csi/socket", "The gRPC endpoint for Target CSI Volume.")
 	volumeNamePrefix     = flag.String("volume-name-prefix", "pvc", "Prefix to apply to the name of a created volume.")
 	volumeNameUUIDLength = flag.Int("volume-name-uuid-length", -1, "Truncates generated UUID of a created volume to this length. Defaults behavior is to NOT truncate.")
@@ -88,16 +90,18 @@ var (
 	leaderElectionNamespace = flag.String("leader-election-namespace", "", "Namespace where the leader election resource lives. Defaults to the pod namespace if not set.")
 	strictTopology          = flag.Bool("strict-topology", false, "Late binding: pass only selected node topology to CreateVolume Request, unlike default behavior of passing aggregated cluster topologies that match with topology keys of the selected node.")
 	immediateTopology       = flag.Bool("immediate-topology", true, "Immediate binding: pass aggregated cluster topologies for all nodes where the CSI driver is available (enabled, the default) or no topology requirements (if disabled).")
-	extraCreateMetadata     = flag.Bool("extra-create-metadata", false, "If set, add pv/pvc metadata to plugin create requests as parameters.")
-	metricsAddress          = flag.String("metrics-address", "", "(deprecated) The TCP network address where the prometheus metrics endpoint will listen (example: `:8080`). The default is empty string, which means metrics endpoint is disabled. Only one of `--metrics-address` and `--http-endpoint` can be set.")
-	httpEndpoint            = flag.String("http-endpoint", "", "The TCP network address where the HTTP server for diagnostics, including pprof, metrics and leader election health check, will listen (example: `:8080`). The default is empty string, which means the server is disabled. Only one of `--metrics-address` and `--http-endpoint` can be set.")
-	metricsPath             = flag.String("metrics-path", "/metrics", "The HTTP path where prometheus metrics will be exposed. Default is `/metrics`.")
-	enableProfile           = flag.Bool("enable-pprof", false, "Enable pprof profiling on the TCP network address specified by --http-endpoint. The HTTP path is `/debug/pprof/`.")
+
+	// zhou: by this way, PVC namespace could be filled into parameters.
+	extraCreateMetadata = flag.Bool("extra-create-metadata", false, "If set, add pv/pvc metadata to plugin create requests as parameters.")
+	metricsAddress      = flag.String("metrics-address", "", "(deprecated) The TCP network address where the prometheus metrics endpoint will listen (example: `:8080`). The default is empty string, which means metrics endpoint is disabled. Only one of `--metrics-address` and `--http-endpoint` can be set.")
+	httpEndpoint        = flag.String("http-endpoint", "", "The TCP network address where the HTTP server for diagnostics, including pprof, metrics and leader election health check, will listen (example: `:8080`). The default is empty string, which means the server is disabled. Only one of `--metrics-address` and `--http-endpoint` can be set.")
+	metricsPath         = flag.String("metrics-path", "/metrics", "The HTTP path where prometheus metrics will be exposed. Default is `/metrics`.")
+	enableProfile       = flag.Bool("enable-pprof", false, "Enable pprof profiling on the TCP network address specified by --http-endpoint. The HTTP path is `/debug/pprof/`.")
 
 	leaderElectionLeaseDuration = flag.Duration("leader-election-lease-duration", 15*time.Second, "Duration, in seconds, that non-leader candidates will wait to force acquire leadership. Defaults to 15 seconds.")
 	leaderElectionRenewDeadline = flag.Duration("leader-election-renew-deadline", 10*time.Second, "Duration, in seconds, that the acting leader will retry refreshing leadership before giving up. Defaults to 10 seconds.")
 	leaderElectionRetryPeriod   = flag.Duration("leader-election-retry-period", 5*time.Second, "Duration, in seconds, the LeaderElector clients should wait between tries of actions. Defaults to 5 seconds.")
-
+	// zhou: why not set default fstype?
 	defaultFSType = flag.String("default-fstype", "", "The default filesystem type of the volume to provision when fstype is unspecified in the StorageClass. If the default is not set and fstype is unset in the StorageClass, then no fstype will be set")
 
 	kubeAPIQPS   = flag.Float32("kube-api-qps", 5, "QPS to use while communicating with the kubernetes apiserver. Defaults to 5.0.")
@@ -106,11 +110,13 @@ var (
 	kubeAPICapacityQPS   = flag.Float32("kube-api-capacity-qps", 1, "QPS to use for storage capacity updates while communicating with the kubernetes apiserver. Defaults to 1.0.")
 	kubeAPICapacityBurst = flag.Int("kube-api-capacity-burst", 5, "Burst to use for storage capacity updates while communicating with the kubernetes apiserver. Defaults to 5.")
 
+	// zhou:
 	enableCapacity           = flag.Bool("enable-capacity", false, "This enables producing CSIStorageCapacity objects with capacity information from the driver's GetCapacity call.")
 	capacityImmediateBinding = flag.Bool("capacity-for-immediate-binding", false, "Enables producing capacity information for storage classes with immediate binding. Not needed for the Kubernetes scheduler, maybe useful for other consumers or for debugging.")
 	capacityPollInterval     = flag.Duration("capacity-poll-interval", time.Minute, "How long the external-provisioner waits before checking for storage capacity changes.")
 	capacityOwnerrefLevel    = flag.Int("capacity-ownerref-level", 1, "The level indicates the number of objects that need to be traversed starting from the pod identified by the POD_NAME and NAMESPACE environment variables to reach the owning object for CSIStorageCapacity objects: -1 for no owner, 0 for the pod itself, 1 for a StatefulSet or DaemonSet, 2 for a Deployment, etc.")
 
+	// zhou: feature to support non-central control storage, e.g. local storage.
 	enableNodeDeployment           = flag.Bool("node-deployment", false, "Enables deploying the external-provisioner together with a CSI driver on nodes to manage node-local volumes.")
 	nodeDeploymentImmediateBinding = flag.Bool("node-deployment-immediate-binding", true, "Determines whether immediate binding is supported when deployed on each node.")
 	nodeDeploymentBaseDelay        = flag.Duration("node-deployment-base-delay", 20*time.Second, "Determines how long the external-provisioner sleeps initially before trying to own a PVC with immediate binding.")
@@ -137,6 +143,8 @@ func main() {
 	flag.Parse()
 
 	ctx := context.Background()
+
+	// zhou: parse external-provisioner feature-gates
 
 	if err := utilfeature.DefaultMutableFeatureGate.SetFromMap(featureGates); err != nil {
 		klog.Fatal(err)
@@ -184,10 +192,13 @@ func main() {
 	config.QPS = *kubeAPIQPS
 	config.Burst = *kubeAPIBurst
 
+	// zhou: for k8s native resource
 	clientset, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		klog.Fatalf("Failed to create client: %v", err)
 	}
+
+	// zhou: clientset for VolumeSnapshot/VolumeSnapshotClass/VolumeSnapshotContent.
 
 	// snapclientset.NewForConfig creates a new Clientset for  VolumesnapshotV1Client
 	snapClient, err := snapclientset.NewForConfig(config)
@@ -210,17 +221,21 @@ func main() {
 		metrics.WithSubsystem(metrics.SubsystemSidecar),
 	)
 
+	// zhou: grpc connect to CSI driver.
 	grpcClient, err := ctrl.Connect(*csiEndpoint, metricsManager)
 	if err != nil {
 		klog.Error(err.Error())
 		os.Exit(1)
 	}
 
+	// zhou: check plugin's health via identify server Probe().
 	err = ctrl.Probe(grpcClient, *operationTimeout)
 	if err != nil {
 		klog.Error(err.Error())
 		os.Exit(1)
 	}
+
+	// zhou: get provisioner name via identify server GetPluginInfo().
 
 	// Autodetect provisioner name
 	provisionerName, err := ctrl.GetDriverName(grpcClient, *operationTimeout)
@@ -230,6 +245,7 @@ func main() {
 	klog.V(2).Infof("Detected CSI driver %s", provisionerName)
 	metricsManager.SetDriverName(provisionerName)
 
+	// zhou: README, handle in-tree plugin migration to CSI driver
 	translator := csitrans.New()
 	supportsMigrationFromInTreePluginName := ""
 	if translator.IsMigratedCSIDriverByName(provisionerName) {
@@ -273,6 +289,7 @@ func main() {
 		metricsManager.GetRegistry(),
 	}
 
+	// zhou: rpc identity server's GetPluginCapabilities() and controller server's GetControllerCapabilities
 	pluginCapabilities, controllerCapabilities, err := ctrl.GetDriverCapabilities(grpcClient, *operationTimeout)
 	if err != nil {
 		klog.Fatalf("Error getting CSI driver capabilities: %s", err)
@@ -285,6 +302,9 @@ func main() {
 		identity = identity + "-" + node
 	}
 
+	// zhou: factory to create informer for k8s native kind.
+	//       Set rsync period to 1 hours (default is 5 hours?)
+
 	factory := informers.NewSharedInformerFactory(clientset, ctrl.ResyncPeriodOfCsiNodeInformer)
 	var factoryForNamespace informers.SharedInformerFactory // usually nil, only used for CSIStorageCapacity
 
@@ -294,6 +314,11 @@ func main() {
 	scLister := factory.Storage().V1().StorageClasses().Lister()
 	claimLister := factory.Core().V1().PersistentVolumeClaims().Lister()
 
+	// zhou: check controller server capability Publish/Unpublish.
+	//       Because external-provisioner only be integrated with controller server.
+	//       So, here we no need to check Node Server's capabilities.
+	//       "VolumeAttachment" Lister is created.
+
 	var vaLister storagelistersv1.VolumeAttachmentLister
 	if controllerCapabilities[csi.ControllerServiceCapability_RPC_PUBLISH_UNPUBLISH_VOLUME] {
 		klog.Info("CSI driver supports PUBLISH_UNPUBLISH_VOLUME, watching VolumeAttachments")
@@ -302,6 +327,7 @@ func main() {
 		klog.Info("CSI driver does not support PUBLISH_UNPUBLISH_VOLUME, not watching VolumeAttachments")
 	}
 
+	// zhou: README, support Node Deployment to consume local storage.
 	var nodeDeployment *ctrl.NodeDeployment
 	if *enableNodeDeployment {
 		nodeDeployment = &ctrl.NodeDeployment{
@@ -317,6 +343,8 @@ func main() {
 		}
 		nodeDeployment.NodeInfo = *nodeInfo
 	}
+
+	// zhou: README, support topology.
 
 	var nodeLister listersv1.NodeLister
 	var csiNodeLister storagelistersv1.CSINodeLister
@@ -361,6 +389,7 @@ func main() {
 			nodeLister = nodes.Lister()
 
 		} else {
+			// zhou: "Create informer to prevent hit the API server for all resource request"
 			csiNodeLister = factory.Storage().V1().CSINodes().Lister()
 			nodeLister = factory.Core().V1().Nodes().Lister()
 		}
@@ -374,24 +403,40 @@ func main() {
 		referenceGrantLister = referenceGrants.Lister()
 	}
 
+	// zhou: used by clone controller.
+
 	// -------------------------------
 	// PersistentVolumeClaims informer
 	rateLimiter := workqueue.NewItemExponentialFailureRateLimiter(*retryIntervalStart, *retryIntervalMax)
 	claimQueue := workqueue.NewNamedRateLimitingQueue(rateLimiter, "claims")
+
+	// zhou: PVC informer
 	claimInformer := factory.Core().V1().PersistentVolumeClaims().Informer()
+
+	// zhou: used by provision controller.
 
 	// Setup options
 	provisionerOptions := []func(*controller.ProvisionController) error{
+		// zhou: "determines whether to enable leader election or not"
 		controller.LeaderElection(false), // Always disable leader election in provisioner lib. Leader election should be done here in the CSI provisioner level instead.
+		// zhou: set "the threshold for max number of retries on failures of Provision" PVC.
 		controller.FailedProvisionThreshold(0),
+		// zhou: set "the threshold for max number of retries on failures of Delete" PVC.
 		controller.FailedDeleteThreshold(0),
+		// zhou: set "the workqueue.RateLimiter to use for the provisioning and deleting work queues."
 		controller.RateLimiter(rateLimiter),
+		// zhou: set "the number of claim and volume workers each to launch".
+		//       "workerThreads" default value is 100.
 		controller.Threadiness(int(*workerThreads)),
+		// zhou: set "the number of retries when we create a PV object for a provisioned volume."
 		controller.CreateProvisionedPVLimiter(workqueue.DefaultControllerRateLimiter()),
+		// zhou: "sets the informer to use for accessing PersistentVolumeClaims."
 		controller.ClaimsInformer(claimInformer),
+		// zhou: "sets the informer to use for accessing Nodes."
 		controller.NodesLister(nodeLister),
 	}
 
+	// zhou: README, feature gate: "HonorPVReclaimPolicy"
 	if utilfeature.DefaultFeatureGate.Enabled(features.HonorPVReclaimPolicy) {
 		provisionerOptions = append(provisionerOptions, controller.AddFinalizer(true))
 	}
@@ -399,6 +444,8 @@ func main() {
 	if supportsMigrationFromInTreePluginName != "" {
 		provisionerOptions = append(provisionerOptions, controller.AdditionalProvisionerNames([]string{supportsMigrationFromInTreePluginName}))
 	}
+
+	// zhou: core object implmenet interfaces "Provisioner", "BlockProvisioner", "Qualifier",
 
 	// Create the provisioner: it implements the Provisioner interface expected by
 	// the controller
@@ -429,6 +476,8 @@ func main() {
 		*controllerPublishReadOnly,
 		*preventVolumeModeConversion,
 	)
+
+	// zhou: README, Storage Capacity
 
 	var capacityController *capacity.Controller
 	if *enableCapacity {
@@ -531,6 +580,8 @@ func main() {
 			klog.Fatalf("unexpected error when checking for the V1 CSIStorageCapacity API: %v", err)
 		}
 
+		// zhou: capacity controller
+
 		capacityController = capacity.NewCentralCapacityController(
 			csi.NewControllerClient(grpcClient),
 			provisionerName,
@@ -553,12 +604,16 @@ func main() {
 		csiProvisioner = capacity.NewProvisionWrapper(csiProvisioner, capacityController)
 	}
 
+	// zhou: provision controller, implemented in lib-external-provisioner.
+
 	provisionController = controller.NewProvisionController(
 		clientset,
 		provisionerName,
 		csiProvisioner,
 		provisionerOptions...,
 	)
+
+	// zhou: clone controller
 
 	csiClaimController := ctrl.NewCloningProtectionController(
 		clientset,
@@ -567,6 +622,8 @@ func main() {
 		claimQueue,
 		controllerCapabilities,
 	)
+
+	// zhou: HTTP server for metrics
 
 	// Start HTTP server, regardless whether we are the leader or not.
 	if addr != "" {
@@ -611,6 +668,8 @@ func main() {
 		}()
 	}
 
+	// zhou: anonymous function to wait for cache sync and run the controllers.
+
 	run := func(ctx context.Context) {
 		factory.Start(ctx.Done())
 		if factoryForNamespace != nil {
@@ -637,14 +696,21 @@ func main() {
 			}
 		}
 
+		// zhou: both capacity controller and clone controller are optional.
+
 		if capacityController != nil {
 			go capacityController.Run(ctx, int(*capacityThreads))
 		}
 		if csiClaimController != nil {
 			go csiClaimController.Run(ctx, int(*finalizerThreads))
 		}
+
+		// zhou: provision controller
 		provisionController.Run(ctx)
 	}
+
+	// zhou: if no need leader election, run the controllers directly.
+	//       Otherwise, we have to wait for leader to run the controllers.
 
 	if !*enableLeaderElection {
 		run(ctx)

@@ -49,6 +49,8 @@ const (
 	ManagedByLabel  = "csi.storage.k8s.io/managed-by"
 )
 
+// zhou: README,
+
 // Controller creates and updates CSIStorageCapacity objects.  It
 // deletes those which are no longer needed because their storage
 // class or topology segment are gone. The controller only manages
@@ -237,6 +239,8 @@ func NewCentralCapacityController(
 }
 
 var _ metrics.StableCollector = &Controller{}
+
+// zhou: README,
 
 // Run is a main Controller handler
 func (c *Controller) Run(ctx context.Context, threadiness int) {
@@ -558,6 +562,8 @@ func (c *Controller) processNextWorkItem(ctx context.Context) bool {
 	return true
 }
 
+// zhou: Reconcile(),
+
 // syncCapacity gets the capacity and then updates or creates the object.
 func (c *Controller) syncCapacity(ctx context.Context, item workItem) error {
 	// We lock only while accessing c.capacities, but not during
@@ -608,6 +614,9 @@ func (c *Controller) syncCapacity(ctx context.Context, item workItem) error {
 			Segments: item.segment.GetLabelMap(),
 		}
 	}
+
+	// zhou:
+
 	syncCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 	resp, err := c.csiController.GetCapacity(syncCtx, req)

@@ -21,6 +21,7 @@ import (
 	"k8s.io/component-base/featuregate"
 )
 
+// zhou: feature gates supported by external-provisioner
 const (
 	// owner: @verult
 	// alpha: v0.4

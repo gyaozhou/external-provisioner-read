@@ -597,6 +597,8 @@ func (ctrl *ProvisionController) HasRun() bool {
 	return ctrl.hasRun
 }
 
+// zhou: README,
+
 // NewProvisionController creates a new provision controller using
 // the given configuration parameters and with private (non-shared) informers.
 func NewProvisionController(

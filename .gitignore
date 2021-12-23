@@ -2,3 +2,7 @@
 
 # IDE directories
 .vscode/
+cscope.files
+cscope.out
+TAGS
+

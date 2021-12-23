@@ -23,6 +23,8 @@ import (
 	"sigs.k8s.io/sig-storage-lib-external-provisioner/v9/controller"
 )
 
+// zhou: derived from "controller.Provisioner"
+
 type provisionWrapper struct {
 	controller.Provisioner
 	c *Controller
@@ -31,6 +33,9 @@ type provisionWrapper struct {
 var _ controller.Provisioner = &provisionWrapper{}
 var _ controller.BlockProvisioner = &provisionWrapper{}
 var _ controller.Qualifier = &provisionWrapper{}
+
+// zhou: README, wrapper of "csiProvisioner struct" to add functionality of
+//       "Wrap Provision and Delete to detect when it is time to refresh capacity."
 
 func NewProvisionWrapper(p controller.Provisioner, c *Controller) controller.Provisioner {
 	return &provisionWrapper{
